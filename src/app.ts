@@ -8,17 +8,36 @@ import {
 import { ResendInvoiceEmailService } from "./services/emailService.js";
 import { processOrdersPaidWebhook } from "./services/ordersPaidProcessor.js";
 
-export function createApp(): express.Express {
+function createWebhookDeps() {
   const config = loadConfig();
-  const app = express();
 
-  const logRepository = new JsonInvoiceEmailLogRepository(config.invoiceEmailLogPath);
-  const emailService = new ResendInvoiceEmailService({
-    apiKey: config.resendApiKey,
-    fromEmail: config.invoiceFromEmail,
-    replyToEmail: config.invoiceReplyToEmail,
-    testRecipientEmail: config.sendInvoiceToTestEmail
-  });
+  return {
+    config,
+    logRepository: new JsonInvoiceEmailLogRepository(config.invoiceEmailLogPath),
+    emailService: new ResendInvoiceEmailService({
+      apiKey: config.resendApiKey,
+      fromEmail: config.invoiceFromEmail,
+      replyToEmail: config.invoiceReplyToEmail,
+      testRecipientEmail: config.sendInvoiceToTestEmail
+    })
+  };
+}
+
+function handleRuntimeConfigError(error: unknown, response: express.Response): boolean {
+  if (error instanceof Error && error.message.startsWith("Missing required environment variable")) {
+    console.error(`[config] ${error.message}`);
+    response.status(500).json({
+      ok: false,
+      error: error.message
+    });
+    return true;
+  }
+
+  return false;
+}
+
+export function createApp(): express.Express {
+  const app = express();
 
   app.get("/health", (_request, response) => {
     response.status(200).json({ ok: true });
@@ -26,6 +45,7 @@ export function createApp(): express.Express {
 
   app.post("/webhooks/orders-paid", express.raw({ type: "application/json" }), async (request, response) => {
     try {
+      const { config, logRepository, emailService } = createWebhookDeps();
       const context = authenticateShopifyWebhook(request, config.shopifyApiSecret);
       const result = await processOrdersPaidWebhook(context, {
         logRepository,
@@ -41,6 +61,10 @@ export function createApp(): express.Express {
         return;
       }
 
+      if (handleRuntimeConfigError(error, response)) {
+        return;
+      }
+
       console.error(`[webhook] Unexpected handler error: ${error instanceof Error ? error.message : String(error)}`);
       response.status(200).json({ ok: true, status: "failed" });
     }
@@ -48,6 +72,7 @@ export function createApp(): express.Express {
 
   app.post("/webhooks/app-uninstalled", express.raw({ type: "application/json" }), (request, response) => {
     try {
+      const { config } = createWebhookDeps();
       const context = authenticateShopifyWebhook(request, config.shopifyApiSecret);
       console.info(`[webhook] App uninstalled shop=${context.shop} webhookId=${context.webhookId}`);
       response.sendStatus(200);
@@ -55,6 +80,10 @@ export function createApp(): express.Express {
       if (error instanceof ShopifyWebhookAuthenticationError) {
         console.warn(`[webhook] App uninstall authentication failed: ${error.message}`);
         response.sendStatus(401);
+        return;
+      }
+
+      if (handleRuntimeConfigError(error, response)) {
         return;
       }
 
@@ -67,6 +96,7 @@ export function createApp(): express.Express {
 
   app.post("/webhooks/compliance", express.raw({ type: "application/json" }), (request, response) => {
     try {
+      const { config } = createWebhookDeps();
       const context = authenticateShopifyWebhook(request, config.shopifyApiSecret);
       console.info(`[webhook] Compliance webhook received topic=${context.topic} shop=${context.shop}`);
       response.sendStatus(200);
@@ -74,6 +104,10 @@ export function createApp(): express.Express {
       if (error instanceof ShopifyWebhookAuthenticationError) {
         console.warn(`[webhook] Compliance authentication failed: ${error.message}`);
         response.sendStatus(401);
+        return;
+      }
+
+      if (handleRuntimeConfigError(error, response)) {
         return;
       }
 
