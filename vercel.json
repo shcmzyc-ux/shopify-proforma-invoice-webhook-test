@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/health",
+      "destination": "/api"
+    },
+    {
+      "source": "/webhooks/:path*",
+      "destination": "/api"
+    }
+  ]
+}

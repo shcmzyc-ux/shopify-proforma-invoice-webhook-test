@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "tsx src/server.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js",
+    "start": "node dist/src/server.js",
     "test:invoice-html": "tsx src/scripts/renderMockInvoice.ts",
     "test:idempotency": "tsx src/scripts/testIdempotency.ts",
     "test:no-email": "tsx src/scripts/testNoEmail.ts",

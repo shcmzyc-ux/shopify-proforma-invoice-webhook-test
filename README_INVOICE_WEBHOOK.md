@@ -111,6 +111,61 @@ Keep `SEND_INVOICE_TO_TEST_EMAIL` set while testing. Confirm Resend receives one
 
 Use a stable HTTPS host and set the final URL in `shopify.app.toml`.
 
+### Deploying to Vercel
+
+This project includes a Vercel Serverless Function entrypoint at `api/index.ts`. `vercel.json` rewrites these public URLs into that function:
+
+```text
+/health
+/webhooks/orders-paid
+/webhooks/app-uninstalled
+/webhooks/compliance
+```
+
+In Vercel:
+
+1. Import this project from GitHub.
+2. Use the default Node.js project settings.
+3. Set the build command to `npm run build`.
+4. Leave the output directory empty.
+5. Add environment variables in Project Settings.
+
+Recommended Vercel environment variables:
+
+```bash
+SHOPIFY_API_SECRET=your_shopify_app_client_secret
+RESEND_API_KEY=re_your_resend_key
+INVOICE_FROM_EMAIL="Invoices <invoices@yourdomain.com>"
+INVOICE_REPLY_TO_EMAIL="support@yourdomain.com"
+SEND_INVOICE_TO_TEST_EMAIL="your-test-inbox@example.com"
+INVOICE_EMAIL_LOG_PATH=/tmp/invoice-email-logs.json
+MAX_INVOICE_EMAIL_RETRY_ATTEMPTS=3
+```
+
+Use `/tmp/invoice-email-logs.json` on Vercel only for MVP testing. Vercel functions have ephemeral storage, so this is not reliable idempotency storage for production. Use Postgres, Vercel Postgres, Neon, Supabase, or another durable database before sending real customer invoices at volume.
+
+After deployment, verify:
+
+```bash
+curl https://your-project.vercel.app/health
+```
+
+Then send a signed mock webhook:
+
+```bash
+SHOPIFY_API_SECRET="same secret as Vercel" \
+MOCK_WEBHOOK_URL="https://your-project.vercel.app/webhooks/orders-paid" \
+npm run test:mock-webhook
+```
+
+The Shopify webhook address should be:
+
+```text
+https://your-project.vercel.app/webhooks/orders-paid
+```
+
+Do not use `/api` in the Shopify webhook URL.
+
 Deploy the Shopify config:
 
 ```bash
