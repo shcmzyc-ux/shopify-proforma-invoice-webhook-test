@@ -1,0 +1,31 @@
+{
+  "name": "shopify-proforma-invoice-webhook",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MVP Shopify orders/paid webhook service that sends test proforma invoices with Resend.",
+  "scripts": {
+    "dev": "tsx src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "test:invoice-html": "tsx src/scripts/renderMockInvoice.ts",
+    "test:idempotency": "tsx src/scripts/testIdempotency.ts",
+    "test:no-email": "tsx src/scripts/testNoEmail.ts",
+    "test:mock-webhook": "tsx src/scripts/sendMockOrdersPaidWebhook.ts",
+    "verify": "npm run build && npm run test:invoice-html && npm run test:idempotency && npm run test:no-email"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "resend": "^4.1.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

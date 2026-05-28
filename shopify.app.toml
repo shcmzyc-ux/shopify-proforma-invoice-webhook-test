@@ -1,0 +1,30 @@
+# Minimal Shopify app config for the standalone webhook MVP.
+# Replace placeholders with real app values before running `shopify app deploy`.
+
+name = "Proforma Invoice Webhook MVP"
+client_id = "replace_with_shopify_client_id"
+application_url = "https://your-app.example.com"
+embedded = false
+
+[access_scopes]
+scopes = "read_orders"
+
+[auth]
+redirect_urls = [
+  "https://your-app.example.com/auth/callback"
+]
+
+[webhooks]
+api_version = "2026-04"
+
+[[webhooks.subscriptions]]
+topics = ["orders/paid"]
+uri = "/webhooks/orders-paid"
+
+[[webhooks.subscriptions]]
+topics = ["app/uninstalled"]
+uri = "/webhooks/app-uninstalled"
+
+[[webhooks.subscriptions]]
+topics = ["customers/data_request", "customers/redact", "shop/redact"]
+uri = "/webhooks/compliance"

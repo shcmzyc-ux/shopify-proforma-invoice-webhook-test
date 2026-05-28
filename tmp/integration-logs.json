@@ -1,0 +1,17 @@
+{
+  "logs": [
+    {
+      "id": "b2759c0e-6c9d-4c63-88be-8020a6d0446b",
+      "shop": "test-shop.myshopify.com",
+      "orderId": "1000000001",
+      "orderName": "#1001",
+      "webhookId": "mock-orders-paid-webhook-id",
+      "recipientEmail": "customer@example.com",
+      "status": "failed",
+      "createdAt": "2026-05-28T06:12:01.636Z",
+      "updatedAt": "2026-05-28T06:12:01.647Z",
+      "attemptCount": 1,
+      "errorMessage": "RESEND_API_KEY is required to send invoice emails"
+    }
+  ]
+}
