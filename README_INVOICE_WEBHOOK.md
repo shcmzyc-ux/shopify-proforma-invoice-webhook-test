@@ -59,13 +59,18 @@ curl http://localhost:3000/health
 
 ## Local Tests
 
-Generate mock invoice HTML:
+Generate mock invoice HTML and PDF:
 
 ```bash
 npm run test:invoice-html
 ```
 
-The preview is written to `tmp/mock-proforma-invoice.html`.
+The previews are written to:
+
+```text
+tmp/mock-proforma-invoice.html
+tmp/mock-proforma-invoice.pdf
+```
 
 Test idempotency without sending real email:
 
@@ -196,7 +201,7 @@ When the variable is removed, the service sends to `order.email`, `order.contact
 
 This sends a test proforma invoice only. It is not a tax invoice and should not be used as official tax documentation.
 
-PDF attachment generation is intentionally stubbed in `generateInvoicePdf(order)` and currently returns `null`.
+PDF attachments are generated with `pdf-lib` and attached directly to the Resend email. They are not stored in durable object storage and do not have a hosted download URL.
 
 The JSON log repository is suitable for local MVP testing, not horizontally scaled production.
 

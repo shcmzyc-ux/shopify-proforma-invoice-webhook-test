@@ -1,6 +1,12 @@
+import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import type { InvoiceEmailPayload, InvoiceLineItem, InvoiceOrder } from "../types/invoice.js";
 import type { ShopifyAddressPayload } from "../types/shopify.js";
 import { formatMoney } from "../utils/money.js";
+
+const PDF_PAGE_WIDTH = 595.28;
+const PDF_PAGE_HEIGHT = 841.89;
+const PDF_MARGIN = 48;
+const PDF_TABLE_WIDTH = PDF_PAGE_WIDTH - PDF_MARGIN * 2;
 
 function escapeHtml(value: unknown): string {
   return String(value ?? "")
@@ -57,9 +63,276 @@ function lineItemRow(item: InvoiceLineItem, currency: string): string {
     </tr>`;
 }
 
-export async function generateInvoicePdf(_order: InvoiceOrder): Promise<Buffer | null> {
-  // TODO: Generate a PDF attachment after choosing a production-ready renderer.
-  return null;
+function safePdfText(value: unknown): string {
+  return String(value ?? "")
+    .replace(/[^\x20-\x7E]/g, "?")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function textWidth(font: PDFFont, text: string, size: number): number {
+  return font.widthOfTextAtSize(text, size);
+}
+
+function truncateText(font: PDFFont, text: string, size: number, maxWidth: number): string {
+  const safeText = safePdfText(text);
+  if (textWidth(font, safeText, size) <= maxWidth) {
+    return safeText;
+  }
+
+  const ellipsis = "...";
+  let truncated = safeText;
+  while (truncated.length > 0 && textWidth(font, `${truncated}${ellipsis}`, size) > maxWidth) {
+    truncated = truncated.slice(0, -1);
+  }
+
+  return `${truncated}${ellipsis}`;
+}
+
+function wrapText(font: PDFFont, text: string, size: number, maxWidth: number): string[] {
+  const words = safePdfText(text).split(" ").filter(Boolean);
+  const lines: string[] = [];
+  let currentLine = "";
+
+  for (const word of words) {
+    const candidate = currentLine ? `${currentLine} ${word}` : word;
+    if (textWidth(font, candidate, size) <= maxWidth) {
+      currentLine = candidate;
+      continue;
+    }
+
+    if (currentLine) {
+      lines.push(currentLine);
+    }
+
+    currentLine = truncateText(font, word, size, maxWidth);
+  }
+
+  if (currentLine) {
+    lines.push(currentLine);
+  }
+
+  return lines.length > 0 ? lines : ["-"];
+}
+
+function drawRightAlignedText(page: PDFPage, text: string, xRight: number, y: number, font: PDFFont, size: number): void {
+  const safeText = safePdfText(text);
+  page.drawText(safeText, {
+    x: xRight - textWidth(font, safeText, size),
+    y,
+    size,
+    font,
+    color: rgb(0.12, 0.16, 0.22)
+  });
+}
+
+export async function generateInvoicePdf(order: InvoiceOrder): Promise<Buffer | null> {
+  const pdfDoc = await PDFDocument.create();
+  const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const invoiceNo = invoiceNumber(order);
+  const currency = order.currency;
+  let page = pdfDoc.addPage([PDF_PAGE_WIDTH, PDF_PAGE_HEIGHT]);
+  let y = PDF_PAGE_HEIGHT - PDF_MARGIN;
+
+  const addPageIfNeeded = (height: number): void => {
+    if (y - height >= PDF_MARGIN) {
+      return;
+    }
+
+    page = pdfDoc.addPage([PDF_PAGE_WIDTH, PDF_PAGE_HEIGHT]);
+    y = PDF_PAGE_HEIGHT - PDF_MARGIN;
+  };
+
+  const drawText = (
+    text: string,
+    x: number,
+    size = 10,
+    font: PDFFont = regularFont,
+    color = rgb(0.12, 0.16, 0.22)
+  ): void => {
+    page.drawText(safePdfText(text), {
+      x,
+      y,
+      size,
+      font,
+      color
+    });
+  };
+
+  page.drawText("PROFORMA INVOICE", {
+    x: PDF_MARGIN,
+    y,
+    size: 22,
+    font: boldFont,
+    color: rgb(0.06, 0.16, 0.26)
+  });
+  drawRightAlignedText(page, invoiceNo, PDF_PAGE_WIDTH - PDF_MARGIN, y + 4, boldFont, 11);
+  y -= 28;
+
+  page.drawRectangle({
+    x: PDF_MARGIN,
+    y: y - 34,
+    width: PDF_TABLE_WIDTH,
+    height: 30,
+    color: rgb(1, 0.95, 0.94),
+    borderColor: rgb(0.7, 0.15, 0.1),
+    borderWidth: 1
+  });
+  y -= 24;
+  drawText("This is a test proforma invoice, not a tax invoice.", PDF_MARGIN + 12, 11, boldFont, rgb(0.48, 0.15, 0.1));
+  y -= 28;
+
+  const leftX = PDF_MARGIN;
+  const rightX = PDF_MARGIN + PDF_TABLE_WIDTH / 2 + 18;
+  const detailLineHeight = 14;
+
+  drawText("Customer", leftX, 11, boldFont);
+  drawText("Order Details", rightX, 11, boldFont);
+  y -= 18;
+
+  const customerLines = [
+    order.customerName || "Customer",
+    order.customerEmail || "",
+    ...addressLines(order.billingAddress)
+  ].filter(Boolean);
+  const orderLines = [
+    `Order: ${order.orderName || order.orderId}`,
+    `Created: ${formatDate(order.createdAt)}`,
+    `Processed: ${formatDate(order.processedAt)}`,
+    `Payment status: ${order.financialStatus || "paid"}`
+  ];
+  const maxInfoLines = Math.max(customerLines.length, orderLines.length);
+
+  for (let index = 0; index < maxInfoLines; index += 1) {
+    if (customerLines[index]) {
+      drawText(customerLines[index], leftX, 9);
+    }
+    if (orderLines[index]) {
+      drawText(orderLines[index], rightX, 9);
+    }
+    y -= detailLineHeight;
+  }
+
+  y -= 20;
+
+  const columns = [
+    { label: "Item", x: PDF_MARGIN + 8, width: 180 },
+    { label: "SKU", x: PDF_MARGIN + 196, width: 62 },
+    { label: "Qty", x: PDF_MARGIN + 268, width: 30, right: PDF_MARGIN + 298 },
+    { label: "Unit", x: PDF_MARGIN + 312, width: 54, right: PDF_MARGIN + 366 },
+    { label: "Discount", x: PDF_MARGIN + 380, width: 54, right: PDF_MARGIN + 434 },
+    { label: "Subtotal", x: PDF_MARGIN + 448, width: 50, right: PDF_MARGIN + 498 }
+  ];
+
+  const drawTableHeader = (): void => {
+    addPageIfNeeded(52);
+    page.drawRectangle({
+      x: PDF_MARGIN,
+      y: y - 18,
+      width: PDF_TABLE_WIDTH,
+      height: 24,
+      color: rgb(0.94, 0.96, 0.98)
+    });
+
+    for (const column of columns) {
+      page.drawText(column.label, {
+        x: column.x,
+        y: y - 10,
+        size: 8,
+        font: boldFont,
+        color: rgb(0.2, 0.31, 0.41)
+      });
+    }
+
+    y -= 28;
+  };
+
+  drawTableHeader();
+
+  for (const item of order.lineItems) {
+    addPageIfNeeded(42);
+    const titleLines = wrapText(regularFont, item.title, 8.5, columns[0].width).slice(0, 2);
+    const rowHeight = Math.max(24, titleLines.length * 11 + 12);
+
+    page.drawLine({
+      start: { x: PDF_MARGIN, y: y + 6 },
+      end: { x: PDF_PAGE_WIDTH - PDF_MARGIN, y: y + 6 },
+      thickness: 0.5,
+      color: rgb(0.85, 0.89, 0.93)
+    });
+
+    titleLines.forEach((line, index) => {
+      page.drawText(line, {
+        x: columns[0].x,
+        y: y - index * 11,
+        size: 8.5,
+        font: regularFont,
+        color: rgb(0.12, 0.16, 0.22)
+      });
+    });
+
+    page.drawText(truncateText(regularFont, item.sku || "-", 8.5, columns[1].width), {
+      x: columns[1].x,
+      y,
+      size: 8.5,
+      font: regularFont,
+      color: rgb(0.12, 0.16, 0.22)
+    });
+
+    drawRightAlignedText(page, String(item.quantity), columns[2].right as number, y, regularFont, 8.5);
+    drawRightAlignedText(page, formatMoney(item.unitPrice, currency), columns[3].right as number, y, regularFont, 8.5);
+    drawRightAlignedText(page, formatMoney(item.discount, currency), columns[4].right as number, y, regularFont, 8.5);
+    drawRightAlignedText(page, formatMoney(item.subtotal, currency), columns[5].right as number, y, regularFont, 8.5);
+
+    y -= rowHeight;
+  }
+
+  y -= 14;
+  addPageIfNeeded(110);
+
+  const totalsX = PDF_PAGE_WIDTH - PDF_MARGIN - 210;
+  const totalLabelX = totalsX;
+  const totalValueRightX = PDF_PAGE_WIDTH - PDF_MARGIN;
+  const totalRows = [
+    ["Subtotal", formatMoney(order.subtotalPrice, currency)],
+    ["Shipping", formatMoney(order.totalShipping, currency)],
+    ["Tax", formatMoney(order.totalTax, currency)],
+    ["Total", formatMoney(order.totalPrice, currency)]
+  ];
+
+  for (const [label, value] of totalRows) {
+    const isGrandTotal = label === "Total";
+    if (isGrandTotal) {
+      page.drawLine({
+        start: { x: totalsX, y: y + 8 },
+        end: { x: totalValueRightX, y: y + 8 },
+        thickness: 1,
+        color: rgb(0.12, 0.16, 0.22)
+      });
+    }
+
+    page.drawText(label, {
+      x: totalLabelX,
+      y,
+      size: isGrandTotal ? 12 : 10,
+      font: isGrandTotal ? boldFont : regularFont,
+      color: rgb(0.12, 0.16, 0.22)
+    });
+    drawRightAlignedText(page, value, totalValueRightX, y, isGrandTotal ? boldFont : regularFont, isGrandTotal ? 12 : 10);
+    y -= isGrandTotal ? 22 : 18;
+  }
+
+  y = Math.max(PDF_MARGIN, y - 18);
+  page.drawText("Generated automatically after Shopify order payment.", {
+    x: PDF_MARGIN,
+    y,
+    size: 8,
+    font: regularFont,
+    color: rgb(0.4, 0.46, 0.53)
+  });
+
+  return Buffer.from(await pdfDoc.save());
 }
 
 export function generateInvoiceHtml(order: InvoiceOrder): string {
