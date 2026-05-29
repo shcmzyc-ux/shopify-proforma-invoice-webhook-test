@@ -78,6 +78,11 @@ export async function processOrdersPaidWebhook(
 
   try {
     const invoice = await buildInvoiceEmail(order);
+    logger.info(
+      `[webhook] Built invoice shop=${context.shop} order=${orderLabel} pdfAttachment=${
+        invoice.pdf ? `${invoice.pdf.length} bytes` : "none"
+      }`
+    );
     const sendResult = await deps.emailService.sendInvoiceEmail({
       to: order.customerEmail,
       orderName: order.orderName,

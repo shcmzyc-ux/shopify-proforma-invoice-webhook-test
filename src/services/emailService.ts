@@ -47,7 +47,8 @@ export class ResendInvoiceEmailService implements InvoiceEmailService {
         : [
             {
               filename: `${input.invoice.invoiceNumber}.pdf`,
-              content: input.invoice.pdf
+              content: input.invoice.pdf.toString("base64"),
+              contentType: "application/pdf"
             }
           ];
 
