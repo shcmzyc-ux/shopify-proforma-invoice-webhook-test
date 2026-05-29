@@ -16,7 +16,7 @@
     "last_name": "Customer"
   },
   "billing_address": {
-    "name": "Jane Customer",
+    "name": "Jane Customer 张三",
     "company": "Example Co",
     "address1": "123 Test Street",
     "address2": "Suite 500",
@@ -30,8 +30,8 @@
   "line_items": [
     {
       "id": 2000000001,
-      "title": "Sample Tote Bag",
-      "name": "Sample Tote Bag",
+      "title": "Sample Tote Bag 测试手提包",
+      "name": "Sample Tote Bag 测试手提包",
       "sku": "TOTE-TEST-001",
       "quantity": 2,
       "price": "79.50",
