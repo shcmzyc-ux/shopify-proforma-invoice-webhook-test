@@ -1,4 +1,7 @@
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import fontkit from "@pdf-lib/fontkit";
+import { PDFDocument, rgb, type PDFFont, type PDFPage, type RGB } from "pdf-lib";
 import type { InvoiceEmailPayload, InvoiceLineItem, InvoiceOrder } from "../types/invoice.js";
 import type { ShopifyAddressPayload } from "../types/shopify.js";
 import { formatMoney } from "../utils/money.js";
@@ -7,6 +10,7 @@ const PDF_PAGE_WIDTH = 595.28;
 const PDF_PAGE_HEIGHT = 841.89;
 const PDF_MARGIN = 48;
 const PDF_TABLE_WIDTH = PDF_PAGE_WIDTH - PDF_MARGIN * 2;
+const FONT_DIR = path.join(process.cwd(), "assets/fonts");
 
 function escapeHtml(value: unknown): string {
   return String(value ?? "")
@@ -63,19 +67,27 @@ function lineItemRow(item: InvoiceLineItem, currency: string): string {
     </tr>`;
 }
 
-function safePdfText(value: unknown): string {
+function latinPdfText(value: unknown): string {
   return String(value ?? "")
     .replace(/[^\x20-\x7E]/g, "?")
     .replace(/\s+/g, " ")
     .trim();
 }
 
+function unicodePdfText(value: unknown): string {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function normalizePdfText(value: unknown, mode: "latin" | "unicode"): string {
+  return mode === "latin" ? latinPdfText(value) : unicodePdfText(value);
+}
+
 function textWidth(font: PDFFont, text: string, size: number): number {
   return font.widthOfTextAtSize(text, size);
 }
 
-function truncateText(font: PDFFont, text: string, size: number, maxWidth: number): string {
-  const safeText = safePdfText(text);
+function truncateText(font: PDFFont, text: string, size: number, maxWidth: number, mode: "latin" | "unicode"): string {
+  const safeText = normalizePdfText(text, mode);
   if (textWidth(font, safeText, size) <= maxWidth) {
     return safeText;
   }
@@ -89,13 +101,29 @@ function truncateText(font: PDFFont, text: string, size: number, maxWidth: numbe
   return `${truncated}${ellipsis}`;
 }
 
-function wrapText(font: PDFFont, text: string, size: number, maxWidth: number): string[] {
-  const words = safePdfText(text).split(" ").filter(Boolean);
+function tokenizeForWrap(text: string): string[] {
+  return text.match(/[\u3400-\u9FFF]|[^\s\u3400-\u9FFF]+|\s+/g) ?? [];
+}
+
+function appendWrapToken(currentLine: string, token: string): string {
+  if (/^\s+$/.test(token)) {
+    return currentLine ? `${currentLine} ` : "";
+  }
+
+  return `${currentLine}${token}`;
+}
+
+function wrapText(font: PDFFont, text: string, size: number, maxWidth: number, mode: "latin" | "unicode"): string[] {
+  const tokens = tokenizeForWrap(normalizePdfText(text, mode));
   const lines: string[] = [];
   let currentLine = "";
 
-  for (const word of words) {
-    const candidate = currentLine ? `${currentLine} ${word}` : word;
+  for (const token of tokens) {
+    const candidate = appendWrapToken(currentLine, token);
+    if (!candidate) {
+      continue;
+    }
+
     if (textWidth(font, candidate, size) <= maxWidth) {
       currentLine = candidate;
       continue;
@@ -105,18 +133,26 @@ function wrapText(font: PDFFont, text: string, size: number, maxWidth: number): 
       lines.push(currentLine);
     }
 
-    currentLine = truncateText(font, word, size, maxWidth);
+    currentLine = truncateText(font, token, size, maxWidth, mode);
   }
 
   if (currentLine) {
-    lines.push(currentLine);
+    lines.push(currentLine.trimEnd());
   }
 
   return lines.length > 0 ? lines : ["-"];
 }
 
-function drawRightAlignedText(page: PDFPage, text: string, xRight: number, y: number, font: PDFFont, size: number): void {
-  const safeText = safePdfText(text);
+function drawRightAlignedText(
+  page: PDFPage,
+  text: string,
+  xRight: number,
+  y: number,
+  font: PDFFont,
+  size: number,
+  mode: "latin" | "unicode"
+): void {
+  const safeText = normalizePdfText(text, mode);
   page.drawText(safeText, {
     x: xRight - textWidth(font, safeText, size),
     y,
@@ -126,48 +162,100 @@ function drawRightAlignedText(page: PDFPage, text: string, xRight: number, y: nu
   });
 }
 
-export async function generateInvoicePdf(order: InvoiceOrder): Promise<Buffer | null> {
-  const pdfDoc = await PDFDocument.create();
-  const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const invoiceNo = invoiceNumber(order);
+type InvoicePdfFonts = {
+  englishRegular: PDFFont;
+  englishBold: PDFFont;
+  chineseRegular: PDFFont;
+  chineseBold: PDFFont;
+};
+
+async function embedInvoiceFonts(pdfDoc: PDFDocument): Promise<InvoicePdfFonts> {
+  pdfDoc.registerFontkit(fontkit);
+
+  const [englishRegular, englishBold, chineseRegular, chineseBold] = await Promise.all([
+    readFile(path.join(FONT_DIR, "PolymathDisp-Regular.otf")),
+    readFile(path.join(FONT_DIR, "PolymathDisp-Bold.otf")),
+    readFile(path.join(FONT_DIR, "SourceHanSansCN-Regular.otf")),
+    readFile(path.join(FONT_DIR, "SourceHanSansCN-Bold.otf"))
+  ]);
+
+  return {
+    englishRegular: await pdfDoc.embedFont(englishRegular, { subset: true }),
+    englishBold: await pdfDoc.embedFont(englishBold, { subset: true }),
+    chineseRegular: await pdfDoc.embedFont(chineseRegular, { subset: true }),
+    chineseBold: await pdfDoc.embedFont(chineseBold, { subset: true })
+  };
+}
+
+type PdfLanguage = "en" | "zh";
+
+type DrawInvoicePageOptions = {
+  page: PDFPage;
+  order: InvoiceOrder;
+  invoiceNo: string;
+  fonts: InvoicePdfFonts;
+  language: PdfLanguage;
+};
+
+function translateFinancialStatus(status?: string): string {
+  if (!status) {
+    return "已付款";
+  }
+
+  const normalized = status.toLowerCase();
+  if (normalized === "paid") {
+    return "已付款";
+  }
+
+  if (normalized === "pending") {
+    return "待付款";
+  }
+
+  if (normalized === "refunded") {
+    return "已退款";
+  }
+
+  return status;
+}
+
+function drawTextAt(
+  page: PDFPage,
+  text: string,
+  x: number,
+  y: number,
+  font: PDFFont,
+  size: number,
+  mode: "latin" | "unicode",
+  color: RGB = rgb(0.12, 0.16, 0.22),
+  maxWidth?: number
+): void {
+  const normalized = maxWidth
+    ? truncateText(font, text, size, maxWidth, mode)
+    : normalizePdfText(text, mode);
+
+  page.drawText(normalized, {
+    x,
+    y,
+    size,
+    font,
+    color
+  });
+}
+
+function drawInvoicePage({ page, order, invoiceNo, fonts, language }: DrawInvoicePageOptions): void {
+  const isChinese = language === "zh";
+  const mode = isChinese ? "unicode" : "latin";
+  const regularFont = isChinese ? fonts.chineseRegular : fonts.englishRegular;
+  const boldFont = isChinese ? fonts.chineseBold : fonts.englishBold;
   const currency = order.currency;
-  let page = pdfDoc.addPage([PDF_PAGE_WIDTH, PDF_PAGE_HEIGHT]);
+  const title = isChinese ? "形式发票" : "PROFORMA INVOICE";
+  const notice = isChinese ? "这是一份测试形式发票，不是税务发票。" : "This is a test proforma invoice, not a tax invoice.";
+  const pageNumber = isChinese ? "第 2 页 / 共 2 页" : "Page 1 of 2";
+
   let y = PDF_PAGE_HEIGHT - PDF_MARGIN;
 
-  const addPageIfNeeded = (height: number): void => {
-    if (y - height >= PDF_MARGIN) {
-      return;
-    }
-
-    page = pdfDoc.addPage([PDF_PAGE_WIDTH, PDF_PAGE_HEIGHT]);
-    y = PDF_PAGE_HEIGHT - PDF_MARGIN;
-  };
-
-  const drawText = (
-    text: string,
-    x: number,
-    size = 10,
-    font: PDFFont = regularFont,
-    color = rgb(0.12, 0.16, 0.22)
-  ): void => {
-    page.drawText(safePdfText(text), {
-      x,
-      y,
-      size,
-      font,
-      color
-    });
-  };
-
-  page.drawText("PROFORMA INVOICE", {
-    x: PDF_MARGIN,
-    y,
-    size: 22,
-    font: boldFont,
-    color: rgb(0.06, 0.16, 0.26)
-  });
-  drawRightAlignedText(page, invoiceNo, PDF_PAGE_WIDTH - PDF_MARGIN, y + 4, boldFont, 11);
+  drawTextAt(page, title, PDF_MARGIN, y, boldFont, isChinese ? 24 : 22, mode, rgb(0.06, 0.16, 0.26));
+  drawRightAlignedText(page, invoiceNo, PDF_PAGE_WIDTH - PDF_MARGIN, y + 4, boldFont, 11, mode);
   y -= 28;
 
   page.drawRectangle({
@@ -179,81 +267,79 @@ export async function generateInvoicePdf(order: InvoiceOrder): Promise<Buffer | 
     borderColor: rgb(0.7, 0.15, 0.1),
     borderWidth: 1
   });
-  y -= 24;
-  drawText("This is a test proforma invoice, not a tax invoice.", PDF_MARGIN + 12, 11, boldFont, rgb(0.48, 0.15, 0.1));
-  y -= 28;
+  drawTextAt(page, notice, PDF_MARGIN + 12, y - 24, boldFont, 10.5, mode, rgb(0.48, 0.15, 0.1), PDF_TABLE_WIDTH - 24);
+  y -= 64;
 
   const leftX = PDF_MARGIN;
   const rightX = PDF_MARGIN + PDF_TABLE_WIDTH / 2 + 18;
-  const detailLineHeight = 14;
-
-  drawText("Customer", leftX, 11, boldFont);
-  drawText("Order Details", rightX, 11, boldFont);
+  drawTextAt(page, isChinese ? "客户信息" : "Customer", leftX, y, boldFont, 11, mode);
+  drawTextAt(page, isChinese ? "订单信息" : "Order Details", rightX, y, boldFont, 11, mode);
   y -= 18;
 
   const customerLines = [
-    order.customerName || "Customer",
+    order.customerName || (isChinese ? "客户" : "Customer"),
     order.customerEmail || "",
     ...addressLines(order.billingAddress)
   ].filter(Boolean);
-  const orderLines = [
-    `Order: ${order.orderName || order.orderId}`,
-    `Created: ${formatDate(order.createdAt)}`,
-    `Processed: ${formatDate(order.processedAt)}`,
-    `Payment status: ${order.financialStatus || "paid"}`
-  ];
+  const orderLines = isChinese
+    ? [
+        `订单：${order.orderName || order.orderId}`,
+        `创建日期：${formatDate(order.createdAt)}`,
+        `处理日期：${formatDate(order.processedAt)}`,
+        `付款状态：${translateFinancialStatus(order.financialStatus)}`
+      ]
+    : [
+        `Order: ${order.orderName || order.orderId}`,
+        `Created: ${formatDate(order.createdAt)}`,
+        `Processed: ${formatDate(order.processedAt)}`,
+        `Payment status: ${order.financialStatus || "paid"}`
+      ];
   const maxInfoLines = Math.max(customerLines.length, orderLines.length);
 
   for (let index = 0; index < maxInfoLines; index += 1) {
     if (customerLines[index]) {
-      drawText(customerLines[index], leftX, 9);
+      drawTextAt(page, customerLines[index], leftX, y, regularFont, 9, mode, rgb(0.12, 0.16, 0.22), 215);
     }
     if (orderLines[index]) {
-      drawText(orderLines[index], rightX, 9);
+      drawTextAt(page, orderLines[index], rightX, y, regularFont, 9, mode, rgb(0.12, 0.16, 0.22), 215);
     }
-    y -= detailLineHeight;
+    y -= 14;
   }
 
   y -= 20;
 
   const columns = [
-    { label: "Item", x: PDF_MARGIN + 8, width: 180 },
+    { label: isChinese ? "商品" : "Item", x: PDF_MARGIN + 8, width: 180 },
     { label: "SKU", x: PDF_MARGIN + 196, width: 62 },
-    { label: "Qty", x: PDF_MARGIN + 268, width: 30, right: PDF_MARGIN + 298 },
-    { label: "Unit", x: PDF_MARGIN + 312, width: 54, right: PDF_MARGIN + 366 },
-    { label: "Discount", x: PDF_MARGIN + 380, width: 54, right: PDF_MARGIN + 434 },
-    { label: "Subtotal", x: PDF_MARGIN + 448, width: 50, right: PDF_MARGIN + 498 }
+    { label: isChinese ? "数量" : "Qty", x: PDF_MARGIN + 268, width: 30, right: PDF_MARGIN + 298 },
+    { label: isChinese ? "单价" : "Unit", x: PDF_MARGIN + 312, width: 54, right: PDF_MARGIN + 366 },
+    { label: isChinese ? "折扣" : "Discount", x: PDF_MARGIN + 380, width: 54, right: PDF_MARGIN + 434 },
+    { label: isChinese ? "小计" : "Subtotal", x: PDF_MARGIN + 448, width: 50, right: PDF_MARGIN + 498 }
   ];
 
-  const drawTableHeader = (): void => {
-    addPageIfNeeded(52);
-    page.drawRectangle({
-      x: PDF_MARGIN,
-      y: y - 18,
-      width: PDF_TABLE_WIDTH,
-      height: 24,
-      color: rgb(0.94, 0.96, 0.98)
-    });
+  page.drawRectangle({
+    x: PDF_MARGIN,
+    y: y - 18,
+    width: PDF_TABLE_WIDTH,
+    height: 24,
+    color: rgb(0.94, 0.96, 0.98)
+  });
 
-    for (const column of columns) {
-      page.drawText(column.label, {
-        x: column.x,
-        y: y - 10,
-        size: 8,
-        font: boldFont,
-        color: rgb(0.2, 0.31, 0.41)
-      });
-    }
+  for (const column of columns) {
+    drawTextAt(page, column.label, column.x, y - 10, boldFont, 8, mode, rgb(0.2, 0.31, 0.41), column.width);
+  }
 
-    y -= 28;
-  };
+  y -= 30;
 
-  drawTableHeader();
+  const minimumTotalSpace = 140;
+  let renderedRows = 0;
 
   for (const item of order.lineItems) {
-    addPageIfNeeded(42);
-    const titleLines = wrapText(regularFont, item.title, 8.5, columns[0].width).slice(0, 2);
+    const titleLines = wrapText(regularFont, item.title, 8.5, columns[0].width, mode).slice(0, 2);
     const rowHeight = Math.max(24, titleLines.length * 11 + 12);
+    if (y - rowHeight < PDF_MARGIN + minimumTotalSpace) {
+      break;
+    }
 
     page.drawLine({
       start: { x: PDF_MARGIN, y: y + 6 },
@@ -263,46 +349,46 @@ export async function generateInvoicePdf(order: InvoiceOrder): Promise<Buffer | 
     });
 
     titleLines.forEach((line, index) => {
-      page.drawText(line, {
-        x: columns[0].x,
-        y: y - index * 11,
-        size: 8.5,
-        font: regularFont,
-        color: rgb(0.12, 0.16, 0.22)
-      });
+      drawTextAt(page, line, columns[0].x, y - index * 11, regularFont, 8.5, mode);
     });
 
-    page.drawText(truncateText(regularFont, item.sku || "-", 8.5, columns[1].width), {
-      x: columns[1].x,
-      y,
-      size: 8.5,
-      font: regularFont,
-      color: rgb(0.12, 0.16, 0.22)
-    });
-
-    drawRightAlignedText(page, String(item.quantity), columns[2].right as number, y, regularFont, 8.5);
-    drawRightAlignedText(page, formatMoney(item.unitPrice, currency), columns[3].right as number, y, regularFont, 8.5);
-    drawRightAlignedText(page, formatMoney(item.discount, currency), columns[4].right as number, y, regularFont, 8.5);
-    drawRightAlignedText(page, formatMoney(item.subtotal, currency), columns[5].right as number, y, regularFont, 8.5);
+    drawTextAt(page, item.sku || "-", columns[1].x, y, regularFont, 8.5, mode, rgb(0.12, 0.16, 0.22), columns[1].width);
+    drawRightAlignedText(page, String(item.quantity), columns[2].right as number, y, regularFont, 8.5, mode);
+    drawRightAlignedText(page, formatMoney(item.unitPrice, currency), columns[3].right as number, y, regularFont, 8.5, mode);
+    drawRightAlignedText(page, formatMoney(item.discount, currency), columns[4].right as number, y, regularFont, 8.5, mode);
+    drawRightAlignedText(page, formatMoney(item.subtotal, currency), columns[5].right as number, y, regularFont, 8.5, mode);
 
     y -= rowHeight;
+    renderedRows += 1;
   }
 
-  y -= 14;
-  addPageIfNeeded(110);
+  const omittedRows = order.lineItems.length - renderedRows;
+  if (omittedRows > 0) {
+    const omittedText = isChinese ? `另有 ${omittedRows} 个商品未在本页显示。` : `${omittedRows} additional item(s) not shown on this page.`;
+    drawTextAt(page, omittedText, PDF_MARGIN + 8, y - 4, regularFont, 8, mode, rgb(0.4, 0.46, 0.53), PDF_TABLE_WIDTH - 16);
+    y -= 22;
+  }
+
+  y = Math.min(y - 12, PDF_MARGIN + minimumTotalSpace - 16);
 
   const totalsX = PDF_PAGE_WIDTH - PDF_MARGIN - 210;
-  const totalLabelX = totalsX;
   const totalValueRightX = PDF_PAGE_WIDTH - PDF_MARGIN;
-  const totalRows = [
-    ["Subtotal", formatMoney(order.subtotalPrice, currency)],
-    ["Shipping", formatMoney(order.totalShipping, currency)],
-    ["Tax", formatMoney(order.totalTax, currency)],
-    ["Total", formatMoney(order.totalPrice, currency)]
-  ];
+  const totalRows = isChinese
+    ? [
+        ["商品小计", formatMoney(order.subtotalPrice, currency)],
+        ["运费", formatMoney(order.totalShipping, currency)],
+        ["税费", formatMoney(order.totalTax, currency)],
+        ["总计", formatMoney(order.totalPrice, currency)]
+      ]
+    : [
+        ["Subtotal", formatMoney(order.subtotalPrice, currency)],
+        ["Shipping", formatMoney(order.totalShipping, currency)],
+        ["Tax", formatMoney(order.totalTax, currency)],
+        ["Total", formatMoney(order.totalPrice, currency)]
+      ];
 
   for (const [label, value] of totalRows) {
-    const isGrandTotal = label === "Total";
+    const isGrandTotal = label === "Total" || label === "总计";
     if (isGrandTotal) {
       page.drawLine({
         start: { x: totalsX, y: y + 8 },
@@ -312,25 +398,34 @@ export async function generateInvoicePdf(order: InvoiceOrder): Promise<Buffer | 
       });
     }
 
-    page.drawText(label, {
-      x: totalLabelX,
-      y,
-      size: isGrandTotal ? 12 : 10,
-      font: isGrandTotal ? boldFont : regularFont,
-      color: rgb(0.12, 0.16, 0.22)
-    });
-    drawRightAlignedText(page, value, totalValueRightX, y, isGrandTotal ? boldFont : regularFont, isGrandTotal ? 12 : 10);
+    drawTextAt(page, label, totalsX, y, isGrandTotal ? boldFont : regularFont, isGrandTotal ? 12 : 10, mode);
+    drawRightAlignedText(page, value, totalValueRightX, y, isGrandTotal ? boldFont : regularFont, isGrandTotal ? 12 : 10, mode);
     y -= isGrandTotal ? 22 : 18;
   }
 
-  y = Math.max(PDF_MARGIN, y - 18);
-  page.drawText("Generated automatically after Shopify order payment.", {
-    x: PDF_MARGIN,
-    y,
-    size: 8,
-    font: regularFont,
-    color: rgb(0.4, 0.46, 0.53)
-  });
+  drawTextAt(
+    page,
+    isChinese ? "订单付款后自动生成。" : "Generated automatically after Shopify order payment.",
+    PDF_MARGIN,
+    PDF_MARGIN,
+    regularFont,
+    8,
+    mode,
+    rgb(0.4, 0.46, 0.53),
+    300
+  );
+  drawRightAlignedText(page, pageNumber, PDF_PAGE_WIDTH - PDF_MARGIN, PDF_MARGIN, regularFont, 8, mode);
+}
+
+export async function generateInvoicePdf(order: InvoiceOrder): Promise<Buffer | null> {
+  const pdfDoc = await PDFDocument.create();
+  const fonts = await embedInvoiceFonts(pdfDoc);
+  const invoiceNo = invoiceNumber(order);
+  const englishPage = pdfDoc.addPage([PDF_PAGE_WIDTH, PDF_PAGE_HEIGHT]);
+  const chinesePage = pdfDoc.addPage([PDF_PAGE_WIDTH, PDF_PAGE_HEIGHT]);
+
+  drawInvoicePage({ page: englishPage, order, invoiceNo, fonts, language: "en" });
+  drawInvoicePage({ page: chinesePage, order, invoiceNo, fonts, language: "zh" });
 
   return Buffer.from(await pdfDoc.save());
 }

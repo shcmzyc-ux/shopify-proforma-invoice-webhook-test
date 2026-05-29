@@ -72,6 +72,13 @@ tmp/mock-proforma-invoice.html
 tmp/mock-proforma-invoice.pdf
 ```
 
+The generated PDF is two pages:
+
+```text
+Page 1: English proforma invoice using Polymath Display
+Page 2: Chinese proforma invoice using Source Han Sans CN
+```
+
 Test idempotency without sending real email:
 
 ```bash
@@ -201,7 +208,7 @@ When the variable is removed, the service sends to `order.email`, `order.contact
 
 This sends a test proforma invoice only. It is not a tax invoice and should not be used as official tax documentation.
 
-PDF attachments are generated with `pdf-lib` and attached directly to the Resend email. They are not stored in durable object storage and do not have a hosted download URL.
+PDF attachments are generated with `pdf-lib`, embedded with the bundled fonts in `assets/fonts`, and attached directly to the Resend email. They are not stored in durable object storage and do not have a hosted download URL.
 
 The JSON log repository is suitable for local MVP testing, not horizontally scaled production.
 
