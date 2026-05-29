@@ -40,7 +40,13 @@ export function createApp(): express.Express {
   const app = express();
 
   app.get("/health", (_request, response) => {
-    response.status(200).json({ ok: true });
+    response.status(200).json({
+      ok: true,
+      features: {
+        pdfInvoiceAttachments: true,
+        resendAttachmentEncoding: "base64"
+      }
+    });
   });
 
   app.post("/webhooks/orders-paid", express.raw({ type: "application/json" }), async (request, response) => {

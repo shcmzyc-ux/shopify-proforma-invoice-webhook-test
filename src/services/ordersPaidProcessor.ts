@@ -93,7 +93,9 @@ export async function processOrdersPaidWebhook(
     logger.info(
       `[webhook] Sent invoice email shop=${context.shop} order=${orderLabel} recipient=${maskEmail(
         sendResult.recipientEmail
-      )} providerMessageId=${sendResult.providerMessageId}`
+      )} pdfAttachment=${invoice.pdf ? `${invoice.pdf.length} bytes` : "none"} providerMessageId=${
+        sendResult.providerMessageId
+      }`
     );
 
     return {
