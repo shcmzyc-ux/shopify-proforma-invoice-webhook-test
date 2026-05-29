@@ -21,6 +21,7 @@
     "@pdf-lib/fontkit": "^1.1.1",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "opencc-js": "^1.3.1",
     "pdf-lib": "^1.17.1",
     "resend": "^4.1.2"
   },

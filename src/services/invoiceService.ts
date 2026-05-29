@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import fontkit from "@pdf-lib/fontkit";
+import { Converter } from "opencc-js";
 import { PDFDocument, rgb, type PDFFont, type PDFPage, type RGB } from "pdf-lib";
 import type { InvoiceEmailPayload, InvoiceLineItem, InvoiceOrder } from "../types/invoice.js";
 import type { ShopifyAddressPayload } from "../types/shopify.js";
@@ -11,6 +12,7 @@ const PDF_PAGE_HEIGHT = 841.89;
 const PDF_MARGIN = 48;
 const PDF_TABLE_WIDTH = PDF_PAGE_WIDTH - PDF_MARGIN * 2;
 const FONT_DIR = path.join(process.cwd(), "assets/fonts");
+const toTraditionalChinese = Converter({ from: "cn", to: "tw" });
 
 function escapeHtml(value: unknown): string {
   return String(value ?? "")
@@ -53,6 +55,10 @@ function addressLines(address?: ShopifyAddressPayload): string[] {
     [address.city, address.province_code || address.province, address.zip].filter(Boolean).join(", "),
     address.country
   ].filter((line): line is string => Boolean(line));
+}
+
+function traditionalText(value: unknown): string {
+  return toTraditionalChinese(String(value ?? ""));
 }
 
 function lineItemRow(item: InvoiceLineItem, currency: string): string {
@@ -182,8 +188,8 @@ async function embedInvoiceFonts(pdfDoc: PDFDocument): Promise<InvoicePdfFonts> 
   return {
     englishRegular: await pdfDoc.embedFont(englishRegular, { subset: true }),
     englishBold: await pdfDoc.embedFont(englishBold, { subset: true }),
-    chineseRegular: await pdfDoc.embedFont(chineseRegular, { subset: false }),
-    chineseBold: await pdfDoc.embedFont(chineseBold, { subset: false })
+    chineseRegular: await pdfDoc.embedFont(chineseRegular, { subset: true }),
+    chineseBold: await pdfDoc.embedFont(chineseBold, { subset: true })
   };
 }
 
@@ -481,17 +487,16 @@ function drawLineItemsTable(
   canvas.y -= 18;
 }
 
-function drawInvoiceHeader(canvas: PdfCanvas, invoiceNo: string, fonts: InvoicePdfFonts): void {
+function drawEnglishInvoiceHeader(canvas: PdfCanvas, invoiceNo: string, fonts: InvoicePdfFonts): void {
   drawTextAt(canvas.page, "PROFORMA INVOICE", PDF_MARGIN, canvas.y, fonts.englishBold, 23, "latin", rgb(0.06, 0.16, 0.26));
-  drawTextAt(canvas.page, "形式發票", PDF_MARGIN, canvas.y - 28, fonts.chineseBold, 18, "unicode", rgb(0.06, 0.16, 0.26));
   drawRightAlignedText(canvas.page, invoiceNo, PDF_PAGE_WIDTH - PDF_MARGIN, canvas.y + 5, fonts.englishBold, 11, "latin");
-  canvas.y -= 56;
+  canvas.y -= 34;
 
   canvas.page.drawRectangle({
     x: PDF_MARGIN,
-    y: canvas.y - 42,
+    y: canvas.y - 28,
     width: PDF_TABLE_WIDTH,
-    height: 38,
+    height: 28,
     color: rgb(1, 0.95, 0.94),
     borderColor: rgb(0.7, 0.15, 0.1),
     borderWidth: 1
@@ -507,18 +512,35 @@ function drawInvoiceHeader(canvas: PdfCanvas, invoiceNo: string, fonts: InvoiceP
     rgb(0.48, 0.15, 0.1),
     PDF_TABLE_WIDTH - 28
   );
+  canvas.y -= 54;
+}
+
+function drawTraditionalChineseInvoiceHeader(canvas: PdfCanvas, invoiceNo: string, fonts: InvoicePdfFonts): void {
+  drawTextAt(canvas.page, "形式發票", PDF_MARGIN, canvas.y, fonts.chineseBold, 24, "unicode", rgb(0.06, 0.16, 0.26));
+  drawRightAlignedText(canvas.page, invoiceNo, PDF_PAGE_WIDTH - PDF_MARGIN, canvas.y + 5, fonts.chineseBold, 11, "unicode");
+  canvas.y -= 34;
+
+  canvas.page.drawRectangle({
+    x: PDF_MARGIN,
+    y: canvas.y - 28,
+    width: PDF_TABLE_WIDTH,
+    height: 28,
+    color: rgb(1, 0.95, 0.94),
+    borderColor: rgb(0.7, 0.15, 0.1),
+    borderWidth: 1
+  });
   drawTextAt(
     canvas.page,
     "這是一份測試形式發票，並非稅務發票。",
     PDF_MARGIN + 14,
-    canvas.y - 34,
+    canvas.y - 18,
     fonts.chineseBold,
     10.5,
     "unicode",
     rgb(0.48, 0.15, 0.1),
     PDF_TABLE_WIDTH - 28
   );
-  canvas.y -= 68;
+  canvas.y -= 54;
 }
 
 function drawEnglishSection(canvas: PdfCanvas, order: InvoiceOrder, fonts: InvoicePdfFonts): void {
@@ -576,16 +598,37 @@ function drawEnglishSection(canvas: PdfCanvas, order: InvoiceOrder, fonts: Invoi
 function drawTraditionalChineseSection(canvas: PdfCanvas, order: InvoiceOrder, fonts: InvoicePdfFonts): void {
   drawSectionHeading(canvas, "繁體中文版本", fonts.chineseBold, "unicode");
   const customerLines = [
-    order.customerName || "客戶",
+    traditionalText(order.customerName || "客戶"),
     order.customerEmail || "",
-    ...addressLines(order.billingAddress)
+    ...addressLines(order.billingAddress).map((line) => traditionalText(line))
   ].filter(Boolean);
   const orderLines = [
-    `訂單：${order.orderName || order.orderId}`,
+    `訂單：${traditionalText(order.orderName || order.orderId)}`,
     `建立日期：${formatDate(order.createdAt)}`,
     `處理日期：${formatDate(order.processedAt)}`,
-    `付款狀態：${translateFinancialStatusTraditional(order.financialStatus)}`
+    `付款狀態：${traditionalText(translateFinancialStatusTraditional(order.financialStatus))}`
   ];
+  const traditionalOrder: InvoiceOrder = {
+    ...order,
+    customerName: traditionalText(order.customerName || ""),
+    billingAddress: order.billingAddress
+      ? {
+          ...order.billingAddress,
+          name: traditionalText(order.billingAddress.name || ""),
+          company: traditionalText(order.billingAddress.company || ""),
+          address1: traditionalText(order.billingAddress.address1 || ""),
+          address2: traditionalText(order.billingAddress.address2 || ""),
+          city: traditionalText(order.billingAddress.city || ""),
+          province: traditionalText(order.billingAddress.province || ""),
+          country: traditionalText(order.billingAddress.country || "")
+        }
+      : undefined,
+    lineItems: order.lineItems.map((item) => ({
+      ...item,
+      title: traditionalText(item.title),
+      sku: traditionalText(item.sku || "")
+    }))
+  };
 
   drawKeyValueGrid(
     canvas,
@@ -599,7 +642,7 @@ function drawTraditionalChineseSection(canvas: PdfCanvas, order: InvoiceOrder, f
 
   drawLineItemsTable(
     canvas,
-    order,
+    traditionalOrder,
     {
       item: "商品",
       sku: "SKU",
@@ -625,23 +668,28 @@ function drawTraditionalChineseSection(canvas: PdfCanvas, order: InvoiceOrder, f
   );
 }
 
-function drawFooterNumbers(pdfDoc: PDFDocument, fonts: InvoicePdfFonts): void {
+function drawFooterNumbers(pdfDoc: PDFDocument, fonts: InvoicePdfFonts, chineseStartPageNumber: number): void {
   const pages = pdfDoc.getPages();
   pages.forEach((page, index) => {
-    const pageLabel = `Page ${index + 1} / ${pages.length}`;
-    const zhLabel = `第 ${index + 1} 頁 / 共 ${pages.length} 頁`;
+    const pageNumber = index + 1;
+    const isChinesePage = pageNumber >= chineseStartPageNumber;
+    const footerText = isChinesePage ? "訂單付款後自動生成。" : "Generated automatically after Shopify order payment.";
+    const pageLabel = isChinesePage ? `第 ${pageNumber} 頁 / 共 ${pages.length} 頁` : `Page ${pageNumber} / ${pages.length}`;
+    const footerFont = isChinesePage ? fonts.chineseRegular : fonts.englishRegular;
+    const footerMode = isChinesePage ? "unicode" : "latin";
+
     drawTextAt(
       page,
-      "Generated automatically after Shopify order payment. / 訂單付款後自動生成。",
+      footerText,
       PDF_MARGIN,
       28,
-      fonts.chineseRegular,
+      footerFont,
       8,
-      "unicode",
+      footerMode,
       rgb(0.4, 0.46, 0.53),
       330
     );
-    drawRightAlignedText(page, `${pageLabel}  ${zhLabel}`, PDF_PAGE_WIDTH - PDF_MARGIN, 28, fonts.chineseRegular, 8, "unicode");
+    drawRightAlignedText(page, pageLabel, PDF_PAGE_WIDTH - PDF_MARGIN, 28, footerFont, 8, footerMode);
   });
 }
 
@@ -656,11 +704,13 @@ export async function generateInvoicePdf(order: InvoiceOrder): Promise<Buffer | 
     pageNumber: 1
   };
 
-  drawInvoiceHeader(canvas, invoiceNo, fonts);
+  drawEnglishInvoiceHeader(canvas, invoiceNo, fonts);
   drawEnglishSection(canvas, order, fonts);
-  ensureSpace(canvas, 70);
+  const chineseStartPageNumber = canvas.pageNumber + 1;
+  addPdfPage(canvas);
+  drawTraditionalChineseInvoiceHeader(canvas, invoiceNo, fonts);
   drawTraditionalChineseSection(canvas, order, fonts);
-  drawFooterNumbers(pdfDoc, fonts);
+  drawFooterNumbers(pdfDoc, fonts, chineseStartPageNumber);
 
   return Buffer.from(await pdfDoc.save());
 }
