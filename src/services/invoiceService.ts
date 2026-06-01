@@ -858,13 +858,26 @@ export async function generateInvoicePdf(order: InvoiceOrder): Promise<Buffer | 
       bodyFont: string
     ): void => {
       const columns = [
-        { key: "item", label: labels.item, x: PDF_MARGIN + 8, width: 176 },
-        { key: "sku", label: labels.sku, x: PDF_MARGIN + 190, width: 62 },
-        { key: "quantity", label: labels.quantity, x: PDF_MARGIN + 262, width: 34 },
-        { key: "unit", label: labels.unitPrice, x: PDF_MARGIN + 310, width: 56 },
-        { key: "discount", label: labels.discount, x: PDF_MARGIN + 380, width: 56 },
-        { key: "subtotal", label: labels.subtotal, x: PDF_MARGIN + 450, width: 50 }
+        { key: "item", label: labels.item, x: PDF_MARGIN + 8, width: 184 },
+        { key: "sku", label: labels.sku, x: PDF_MARGIN + 202, width: 106 },
+        { key: "quantity", label: labels.quantity, x: PDF_MARGIN + 318, width: 26 },
+        { key: "unit", label: labels.unitPrice, x: PDF_MARGIN + 354, width: 48 },
+        { key: "discount", label: labels.discount, x: PDF_MARGIN + 412, width: 48 },
+        { key: "subtotal", label: labels.subtotal, x: PDF_MARGIN + 470, width: 38 }
       ];
+
+      const drawSingleLineCell = (text: string, x: number, y: number, width: number, align: "left" | "right" = "left"): void => {
+        let fontSize = 9;
+        while (fontSize > 6.5 && doc.widthOfString(text, { width }) > width) {
+          fontSize -= 0.5;
+        }
+
+        doc.font(bodyFont).fontSize(fontSize).text(text, x, y, {
+          width,
+          align,
+          lineBreak: false
+        });
+      };
 
       const drawHeader = (): void => {
         ensureSpace(42);
@@ -892,11 +905,11 @@ export async function generateInvoicePdf(order: InvoiceOrder): Promise<Buffer | 
         doc.moveTo(PDF_MARGIN, y - 5).lineTo(PDF_MARGIN + contentWidth, y - 5).lineWidth(0.5).strokeColor("#d9e2ec").stroke();
         doc.fillColor("#1f2933").font(bodyFont).fontSize(9);
         doc.text(item.title, columns[0].x, y, { width: columns[0].width, lineGap: 4 });
-        doc.text(item.sku || "-", columns[1].x, y, { width: columns[1].width });
-        doc.text(String(item.quantity), columns[2].x, y, { width: columns[2].width, align: "right" });
-        doc.text(formatMoney(item.unitPrice, order.currency), columns[3].x, y, { width: columns[3].width, align: "right" });
-        doc.text(formatMoney(item.discount, order.currency), columns[4].x, y, { width: columns[4].width, align: "right" });
-        doc.text(formatMoney(item.subtotal, order.currency), columns[5].x, y, { width: columns[5].width, align: "right" });
+        drawSingleLineCell(item.sku || "-", columns[1].x, y, columns[1].width);
+        drawSingleLineCell(String(item.quantity), columns[2].x, y, columns[2].width, "right");
+        drawSingleLineCell(formatMoney(item.unitPrice, order.currency), columns[3].x, y, columns[3].width, "right");
+        drawSingleLineCell(formatMoney(item.discount, order.currency), columns[4].x, y, columns[4].width, "right");
+        drawSingleLineCell(formatMoney(item.subtotal, order.currency), columns[5].x, y, columns[5].width, "right");
         doc.y = y + rowHeight;
       }
 
