@@ -59,6 +59,7 @@ export type ShopifyOrderPayload = {
     default_address?: ShopifyAddressPayload;
   };
   billing_address?: ShopifyAddressPayload;
+  shipping_address?: ShopifyAddressPayload;
   line_items?: ShopifyLineItemPayload[];
   shipping_lines?: ShopifyShippingLinePayload[];
   total_shipping_price_set?: ShopifyMoneySet;

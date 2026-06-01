@@ -17,6 +17,7 @@ export type InvoiceOrder = {
   customerEmail?: string;
   customerName?: string;
   billingAddress?: ShopifyAddressPayload;
+  shippingAddress?: ShopifyAddressPayload;
   lineItems: InvoiceLineItem[];
   subtotalPrice: number;
   totalTax: number;

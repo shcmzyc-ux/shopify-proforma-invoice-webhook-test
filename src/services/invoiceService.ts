@@ -62,6 +62,40 @@ function traditionalText(value: unknown): string {
   return toTraditionalChinese(String(value ?? ""));
 }
 
+function isHongKongAddress(address?: ShopifyAddressPayload): boolean {
+  if (!address) {
+    return false;
+  }
+
+  const values = [
+    address.country_code,
+    address.country,
+    address.province_code,
+    address.province,
+    address.city
+  ]
+    .filter(Boolean)
+    .map((value) => String(value).trim().toLowerCase());
+
+  return values.some(
+    (value) =>
+      value === "hk" ||
+      value === "hkg" ||
+      value === "hong kong" ||
+      value === "hong kong sar" ||
+      value === "hong kong s.a.r." ||
+      value === "hong kong sar china" ||
+      value === "hong kong s.a.r. china" ||
+      value === "香港" ||
+      value === "中國香港" ||
+      value === "中国香港"
+  );
+}
+
+function shouldUseTraditionalChinesePdf(order: InvoiceOrder): boolean {
+  return isHongKongAddress(order.shippingAddress) || isHongKongAddress(order.billingAddress);
+}
+
 function lineItemRow(item: InvoiceLineItem, currency: string): string {
   return `
     <tr>
@@ -722,7 +756,7 @@ export async function generateInvoicePdf(order: InvoiceOrder): Promise<Buffer | 
     doc.registerFont("ChineseBold", chineseBoldPath);
 
     let pageIndex = 0;
-    let chineseStartPageIndex = 1;
+    const useTraditionalChinesePdf = shouldUseTraditionalChinesePdf(order);
     const contentWidth = doc.page.width - PDF_MARGIN * 2;
     const contentBottom = doc.page.height - PDF_MARGIN - 42;
 
@@ -886,107 +920,108 @@ export async function generateInvoicePdf(order: InvoiceOrder): Promise<Buffer | 
       doc.y += 18;
     };
 
-    doc.fillColor("#102a43").font("EnglishBold").fontSize(23).text("PROFORMA INVOICE", PDF_MARGIN, doc.y, {
-      width: contentWidth - 170
-    });
-    doc.font("EnglishBold").fontSize(11).text(invoiceNo, PDF_MARGIN, PDF_MARGIN + 5, {
-      width: contentWidth,
-      align: "right"
-    });
-    doc.y = PDF_MARGIN + 42;
-    drawNotice("This is a test proforma invoice, not a tax invoice.", "EnglishBold");
-    drawSectionHeading("English Version", "EnglishBold");
-    drawKeyValueGridKit(
-      "Customer",
-      "Order Details",
-      [order.customerName || "Customer", order.customerEmail || "", ...addressLines(order.billingAddress)].filter(Boolean),
-      [
-        `Order: ${order.orderName || order.orderId}`,
-        `Created: ${formatDate(order.createdAt)}`,
-        `Processed: ${formatDate(order.processedAt)}`,
-        `Payment status: ${order.financialStatus || "paid"}`
-      ],
-      "EnglishBold",
-      "ChineseRegular"
-    );
-    drawTable(
-      order.lineItems,
-      { item: "Item", sku: "SKU", quantity: "Qty", unitPrice: "Unit", discount: "Discount", subtotal: "Subtotal" },
-      "EnglishBold",
-      "ChineseRegular"
-    );
-    drawTotalsKit(
-      [
-        ["Subtotal", formatMoney(order.subtotalPrice, order.currency)],
-        ["Shipping", formatMoney(order.totalShipping, order.currency)],
-        ["Tax", formatMoney(order.totalTax, order.currency)],
-        ["Total", formatMoney(order.totalPrice, order.currency)]
-      ],
-      "EnglishRegular",
-      "EnglishBold"
-    );
+    if (useTraditionalChinesePdf) {
+      doc.fillColor("#102a43").font("ChineseBold").fontSize(24).text("形式發票", PDF_MARGIN, doc.y, {
+        width: contentWidth - 170
+      });
+      doc.font("ChineseBold").fontSize(11).text(invoiceNo, PDF_MARGIN, PDF_MARGIN + 5, {
+        width: contentWidth,
+        align: "right"
+      });
+      doc.y = PDF_MARGIN + 42;
+      drawNotice("這是一份測試形式發票，並非稅務發票。", "ChineseBold");
+      drawSectionHeading("繁體中文版本", "ChineseBold");
 
-    addPage();
-    chineseStartPageIndex = pageIndex;
-    doc.fillColor("#102a43").font("ChineseBold").fontSize(24).text("形式發票", PDF_MARGIN, doc.y, {
-      width: contentWidth - 170
-    });
-    doc.font("ChineseBold").fontSize(11).text(invoiceNo, PDF_MARGIN, PDF_MARGIN + 5, {
-      width: contentWidth,
-      align: "right"
-    });
-    doc.y = PDF_MARGIN + 42;
-    drawNotice("這是一份測試形式發票，並非稅務發票。", "ChineseBold");
-    drawSectionHeading("繁體中文版本", "ChineseBold");
+      const displayAddress = order.shippingAddress ?? order.billingAddress;
+      const traditionalOrder: InvoiceOrder = {
+        ...order,
+        customerName: traditionalText(order.customerName || ""),
+        lineItems: order.lineItems.map((item) => ({
+          ...item,
+          title: traditionalText(item.title),
+          sku: traditionalText(item.sku || "")
+        }))
+      };
 
-    const traditionalOrder: InvoiceOrder = {
-      ...order,
-      customerName: traditionalText(order.customerName || ""),
-      lineItems: order.lineItems.map((item) => ({
-        ...item,
-        title: traditionalText(item.title),
-        sku: traditionalText(item.sku || "")
-      }))
-    };
-
-    drawKeyValueGridKit(
-      "客戶資訊",
-      "訂單資訊",
-      [
-        traditionalText(order.customerName || "客戶"),
-        order.customerEmail || "",
-        ...addressLines(order.billingAddress).map((line) => traditionalText(line))
-      ].filter(Boolean),
-      [
-        `訂單：${traditionalText(order.orderName || order.orderId)}`,
-        `建立日期：${formatDate(order.createdAt)}`,
-        `處理日期：${formatDate(order.processedAt)}`,
-        `付款狀態：${traditionalText(translateFinancialStatusTraditional(order.financialStatus))}`
-      ],
-      "ChineseBold",
-      "ChineseRegular"
-    );
-    drawTable(
-      traditionalOrder.lineItems,
-      { item: "商品", sku: "SKU", quantity: "數量", unitPrice: "單價", discount: "折扣", subtotal: "小計" },
-      "ChineseBold",
-      "ChineseRegular"
-    );
-    drawTotalsKit(
-      [
-        ["商品小計", formatMoney(order.subtotalPrice, order.currency)],
-        ["運費", formatMoney(order.totalShipping, order.currency)],
-        ["稅費", formatMoney(order.totalTax, order.currency)],
-        ["總計", formatMoney(order.totalPrice, order.currency)]
-      ],
-      "ChineseRegular",
-      "ChineseBold"
-    );
+      drawKeyValueGridKit(
+        "客戶資訊",
+        "訂單資訊",
+        [
+          traditionalText(order.customerName || "客戶"),
+          order.customerEmail || "",
+          ...addressLines(displayAddress).map((line) => traditionalText(line))
+        ].filter(Boolean),
+        [
+          `訂單：${traditionalText(order.orderName || order.orderId)}`,
+          `建立日期：${formatDate(order.createdAt)}`,
+          `處理日期：${formatDate(order.processedAt)}`,
+          `付款狀態：${traditionalText(translateFinancialStatusTraditional(order.financialStatus))}`
+        ],
+        "ChineseBold",
+        "ChineseRegular"
+      );
+      drawTable(
+        traditionalOrder.lineItems,
+        { item: "商品", sku: "SKU", quantity: "數量", unitPrice: "單價", discount: "折扣", subtotal: "小計" },
+        "ChineseBold",
+        "ChineseRegular"
+      );
+      drawTotalsKit(
+        [
+          ["商品小計", formatMoney(order.subtotalPrice, order.currency)],
+          ["運費", formatMoney(order.totalShipping, order.currency)],
+          ["稅費", formatMoney(order.totalTax, order.currency)],
+          ["總計", formatMoney(order.totalPrice, order.currency)]
+        ],
+        "ChineseRegular",
+        "ChineseBold"
+      );
+    } else {
+      doc.fillColor("#102a43").font("EnglishBold").fontSize(23).text("PROFORMA INVOICE", PDF_MARGIN, doc.y, {
+        width: contentWidth - 170
+      });
+      doc.font("EnglishBold").fontSize(11).text(invoiceNo, PDF_MARGIN, PDF_MARGIN + 5, {
+        width: contentWidth,
+        align: "right"
+      });
+      doc.y = PDF_MARGIN + 42;
+      drawNotice("This is a test proforma invoice, not a tax invoice.", "EnglishBold");
+      drawSectionHeading("English Version", "EnglishBold");
+      drawKeyValueGridKit(
+        "Customer",
+        "Order Details",
+        [order.customerName || "Customer", order.customerEmail || "", ...addressLines(order.shippingAddress ?? order.billingAddress)].filter(Boolean),
+        [
+          `Order: ${order.orderName || order.orderId}`,
+          `Created: ${formatDate(order.createdAt)}`,
+          `Processed: ${formatDate(order.processedAt)}`,
+          `Payment status: ${order.financialStatus || "paid"}`
+        ],
+        "EnglishBold",
+        "ChineseRegular"
+      );
+      drawTable(
+        order.lineItems,
+        { item: "Item", sku: "SKU", quantity: "Qty", unitPrice: "Unit", discount: "Discount", subtotal: "Subtotal" },
+        "EnglishBold",
+        "ChineseRegular"
+      );
+      drawTotalsKit(
+        [
+          ["Subtotal", formatMoney(order.subtotalPrice, order.currency)],
+          ["Shipping", formatMoney(order.totalShipping, order.currency)],
+          ["Tax", formatMoney(order.totalTax, order.currency)],
+          ["Total", formatMoney(order.totalPrice, order.currency)]
+        ],
+        "EnglishRegular",
+        "EnglishBold"
+      );
+    }
 
     const range = doc.bufferedPageRange();
     for (let index = range.start; index < range.start + range.count; index += 1) {
       doc.switchToPage(index);
-      const isChinesePage = index >= chineseStartPageIndex;
+      const isChinesePage = useTraditionalChinesePdf;
       const footerFont = isChinesePage ? "ChineseRegular" : "EnglishRegular";
       const footerText = isChinesePage ? "訂單付款後自動生成。" : "Generated automatically after Shopify order payment.";
       const pageLabel = isChinesePage ? `第 ${index + 1} 頁 / 共 ${range.count} 頁` : `Page ${index + 1} / ${range.count}`;

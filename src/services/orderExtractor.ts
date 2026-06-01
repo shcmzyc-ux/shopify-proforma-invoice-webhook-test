@@ -48,6 +48,7 @@ function extractLineItems(payload: ShopifyOrderPayload): InvoiceLineItem[] {
 
 export function extractInvoiceOrder(payload: ShopifyOrderPayload): InvoiceOrder {
   const billingAddress = payload.billing_address ?? payload.customer?.default_address;
+  const shippingAddress = payload.shipping_address;
   const customerName =
     compactName(payload.customer?.first_name, payload.customer?.last_name) ?? addressName(billingAddress);
 
@@ -59,6 +60,7 @@ export function extractInvoiceOrder(payload: ShopifyOrderPayload): InvoiceOrder 
     customerEmail: payload.email ?? payload.contact_email ?? payload.customer?.email,
     customerName,
     billingAddress,
+    shippingAddress,
     lineItems: extractLineItems(payload),
     subtotalPrice: parseMoney(payload.subtotal_price),
     totalTax: parseMoney(payload.total_tax),

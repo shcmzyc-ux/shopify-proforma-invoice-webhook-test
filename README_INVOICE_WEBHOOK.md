@@ -72,11 +72,11 @@ tmp/mock-proforma-invoice.html
 tmp/mock-proforma-invoice.pdf
 ```
 
-The generated PDF contains separate language sections:
+The generated PDF language depends on the order region:
 
 ```text
-English version first, starting on page 1
-Traditional Chinese version next, always starting on a new page
+Hong Kong shipping or billing address: Traditional Chinese PDF
+All other regions: English PDF
 ```
 
 Test idempotency without sending real email:
@@ -208,7 +208,7 @@ When the variable is removed, the service sends to `order.email`, `order.contact
 
 This sends a test proforma invoice only. It is not a tax invoice and should not be used as official tax documentation.
 
-PDF attachments are generated with `pdf-lib`, embedded with the bundled fonts in `assets/fonts`, converted to Traditional Chinese with `opencc-js`, and attached directly to the Resend email. They are not stored in durable object storage and do not have a hosted download URL.
+PDF attachments are generated with `pdfkit`, embedded with the bundled fonts in `assets/fonts`, converted to Traditional Chinese with `opencc-js` for Hong Kong orders, and attached directly to the Resend email. They are not stored in durable object storage and do not have a hosted download URL.
 
 The JSON log repository is suitable for local MVP testing, not horizontally scaled production.
 
