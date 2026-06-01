@@ -41,16 +41,17 @@ export class ResendInvoiceEmailService implements InvoiceEmailService {
 
     const recipientEmail = this.config.testRecipientEmail || input.to;
     const subject = `Proforma Invoice for Order ${input.orderName || input.invoice.order.orderId}`;
-    const attachments =
-      input.invoice.pdf === null
-        ? undefined
-        : [
-            {
-              filename: `${input.invoice.invoiceNumber}.pdf`,
-              content: input.invoice.pdf.toString("base64"),
-              contentType: "application/pdf"
-            }
-          ];
+    const invoiceAttachments =
+      input.invoice.pdfAttachments && input.invoice.pdfAttachments.length > 0
+        ? input.invoice.pdfAttachments
+        : input.invoice.pdf
+          ? [{ filename: `${input.invoice.invoiceNumber}.pdf`, content: input.invoice.pdf }]
+          : [];
+    const attachments = invoiceAttachments.map((attachment) => ({
+      filename: attachment.filename,
+      content: attachment.content.toString("base64"),
+      contentType: "application/pdf"
+    }));
 
     const response = await this.resend.emails.send({
       from: this.config.fromEmail,
@@ -58,7 +59,7 @@ export class ResendInvoiceEmailService implements InvoiceEmailService {
       replyTo: this.config.replyToEmail,
       subject,
       html: input.invoice.html,
-      attachments
+      attachments: attachments.length > 0 ? attachments : undefined
     });
 
     if (response.error) {

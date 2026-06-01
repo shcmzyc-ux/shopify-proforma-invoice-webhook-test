@@ -32,4 +32,8 @@ export type InvoiceEmailPayload = {
   order: InvoiceOrder;
   html: string;
   pdf: Buffer | null;
+  pdfAttachments?: Array<{
+    filename: string;
+    content: Buffer;
+  }>;
 };

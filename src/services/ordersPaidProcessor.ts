@@ -78,10 +78,11 @@ export async function processOrdersPaidWebhook(
 
   try {
     const invoice = await buildInvoiceEmail(order);
+    const totalPdfBytes = invoice.pdfAttachments?.reduce((sum, attachment) => sum + attachment.content.length, 0) ?? invoice.pdf?.length ?? 0;
     logger.info(
-      `[webhook] Built invoice shop=${context.shop} order=${orderLabel} pdfAttachment=${
-        invoice.pdf ? `${invoice.pdf.length} bytes` : "none"
-      }`
+      `[webhook] Built invoice shop=${context.shop} order=${orderLabel} pdfAttachments=${
+        invoice.pdfAttachments?.length ?? (invoice.pdf ? 1 : 0)
+      } totalPdfBytes=${totalPdfBytes || "none"}`
     );
     const sendResult = await deps.emailService.sendInvoiceEmail({
       to: order.customerEmail,
@@ -93,7 +94,9 @@ export async function processOrdersPaidWebhook(
     logger.info(
       `[webhook] Sent invoice email shop=${context.shop} order=${orderLabel} recipient=${maskEmail(
         sendResult.recipientEmail
-      )} pdfAttachment=${invoice.pdf ? `${invoice.pdf.length} bytes` : "none"} providerMessageId=${
+      )} pdfAttachments=${invoice.pdfAttachments?.length ?? (invoice.pdf ? 1 : 0)} totalPdfBytes=${
+        totalPdfBytes || "none"
+      } providerMessageId=${
         sendResult.providerMessageId
       }`
     );

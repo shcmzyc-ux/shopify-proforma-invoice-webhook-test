@@ -96,6 +96,8 @@ function shouldUseTraditionalChinesePdf(order: InvoiceOrder): boolean {
   return isHongKongAddress(order.shippingAddress) || isHongKongAddress(order.billingAddress);
 }
 
+type InvoicePdfLanguage = "en" | "zh-Hant";
+
 function lineItemRow(item: InvoiceLineItem, currency: string): string {
   return `
     <tr>
@@ -728,7 +730,7 @@ function drawFooterNumbers(pdfDoc: PDFDocument, fonts: InvoicePdfFonts, chineseS
   });
 }
 
-export async function generateInvoicePdf(order: InvoiceOrder): Promise<Buffer | null> {
+export async function generateInvoicePdf(order: InvoiceOrder, language?: InvoicePdfLanguage): Promise<Buffer | null> {
   const invoiceNo = invoiceNumber(order);
   const chunks: Buffer[] = [];
   const pdfBuffer = new Promise<Buffer>((resolve, reject) => {
@@ -756,7 +758,7 @@ export async function generateInvoicePdf(order: InvoiceOrder): Promise<Buffer | 
     doc.registerFont("ChineseBold", chineseBoldPath);
 
     let pageIndex = 0;
-    const useTraditionalChinesePdf = shouldUseTraditionalChinesePdf(order);
+    const useTraditionalChinesePdf = language ? language === "zh-Hant" : shouldUseTraditionalChinesePdf(order);
     const contentWidth = doc.page.width - PDF_MARGIN * 2;
     const contentBottom = doc.page.height - PDF_MARGIN - 78;
 
@@ -1247,10 +1249,19 @@ export function generateInvoiceHtml(order: InvoiceOrder): string {
 }
 
 export async function buildInvoiceEmail(order: InvoiceOrder): Promise<InvoiceEmailPayload> {
+  const number = invoiceNumber(order);
+  const englishPdf = await generateInvoicePdf(order, "en");
+  const traditionalChinesePdf = await generateInvoicePdf(order, "zh-Hant");
+  const pdfAttachments = [
+    englishPdf ? { filename: `${number}-EN.pdf`, content: englishPdf } : undefined,
+    traditionalChinesePdf ? { filename: `${number}-ZH-HANT.pdf`, content: traditionalChinesePdf } : undefined
+  ].filter((attachment): attachment is { filename: string; content: Buffer } => Boolean(attachment));
+
   return {
-    invoiceNumber: invoiceNumber(order),
+    invoiceNumber: number,
     order,
     html: generateInvoiceHtml(order),
-    pdf: await generateInvoicePdf(order)
+    pdf: englishPdf,
+    pdfAttachments
   };
 }

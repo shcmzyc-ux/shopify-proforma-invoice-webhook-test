@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { generateInvoiceHtml, generateInvoicePdf } from "../services/invoiceService.js";
+import { buildInvoiceEmail, generateInvoiceHtml, generateInvoicePdf } from "../services/invoiceService.js";
 import { extractInvoiceOrder } from "../services/orderExtractor.js";
 import type { ShopifyOrderPayload } from "../types/shopify.js";
 
@@ -15,6 +15,7 @@ const payload = JSON.parse(await fs.readFile(mockPath, "utf8")) as ShopifyOrderP
 const order = extractInvoiceOrder(payload);
 const html = generateInvoiceHtml(order);
 const pdf = await generateInvoicePdf(order);
+const invoiceEmail = await buildInvoiceEmail(order);
 const hongKongPayload: ShopifyOrderPayload = {
   ...payload,
   id: "1000000002",
@@ -43,6 +44,12 @@ if (!pdf || !pdf.subarray(0, 4).equals(Buffer.from("%PDF"))) {
 
 await fs.writeFile(pdfOutputPath, pdf);
 console.info(`Invoice PDF generated: ${pdfOutputPath}`);
+
+for (const attachment of invoiceEmail.pdfAttachments ?? []) {
+  const attachmentPath = path.join(rootDir, "tmp", attachment.filename);
+  await fs.writeFile(attachmentPath, attachment.content);
+  console.info(`Invoice attachment generated: ${attachmentPath}`);
+}
 
 if (!hongKongPdf || !hongKongPdf.subarray(0, 4).equals(Buffer.from("%PDF"))) {
   throw new Error("Hong Kong invoice PDF was not generated correctly");
