@@ -758,7 +758,7 @@ export async function generateInvoicePdf(order: InvoiceOrder): Promise<Buffer | 
     let pageIndex = 0;
     const useTraditionalChinesePdf = shouldUseTraditionalChinesePdf(order);
     const contentWidth = doc.page.width - PDF_MARGIN * 2;
-    const contentBottom = doc.page.height - PDF_MARGIN - 42;
+    const contentBottom = doc.page.height - PDF_MARGIN - 78;
 
     const addPage = (): void => {
       doc.addPage();
@@ -858,12 +858,12 @@ export async function generateInvoicePdf(order: InvoiceOrder): Promise<Buffer | 
       bodyFont: string
     ): void => {
       const columns = [
-        { key: "item", label: labels.item, x: PDF_MARGIN + 8, width: 184 },
-        { key: "sku", label: labels.sku, x: PDF_MARGIN + 202, width: 106 },
-        { key: "quantity", label: labels.quantity, x: PDF_MARGIN + 318, width: 26 },
-        { key: "unit", label: labels.unitPrice, x: PDF_MARGIN + 354, width: 48 },
-        { key: "discount", label: labels.discount, x: PDF_MARGIN + 412, width: 48 },
-        { key: "subtotal", label: labels.subtotal, x: PDF_MARGIN + 470, width: 38 }
+        { key: "item", label: labels.item, x: PDF_MARGIN + 8, width: 154 },
+        { key: "sku", label: labels.sku, x: PDF_MARGIN + 170, width: 104 },
+        { key: "quantity", label: labels.quantity, x: PDF_MARGIN + 282, width: 22 },
+        { key: "unit", label: labels.unitPrice, x: PDF_MARGIN + 312, width: 54 },
+        { key: "discount", label: labels.discount, x: PDF_MARGIN + 374, width: 54 },
+        { key: "subtotal", label: labels.subtotal, x: PDF_MARGIN + 436, width: 62 }
       ];
 
       const drawSingleLineCell = (text: string, x: number, y: number, width: number, align: "left" | "right" = "left"): void => {
@@ -917,9 +917,10 @@ export async function generateInvoicePdf(order: InvoiceOrder): Promise<Buffer | 
     };
 
     const drawTotalsKit = (rows: Array<[string, string]>, regularFont: string, boldFont: string): void => {
-      ensureSpace(122);
+      ensureSpace(138);
       const x = doc.page.width - PDF_MARGIN - 230;
       const valueX = doc.page.width - PDF_MARGIN - 120;
+      doc.y += 4;
       for (const [label, value] of rows) {
         const isTotal = label === "Total" || label === "總計";
         if (isTotal) {
@@ -943,7 +944,6 @@ export async function generateInvoicePdf(order: InvoiceOrder): Promise<Buffer | 
       });
       doc.y = PDF_MARGIN + 42;
       drawNotice("這是一份測試形式發票，並非稅務發票。", "ChineseBold");
-      drawSectionHeading("繁體中文版本", "ChineseBold");
 
       const displayAddress = order.shippingAddress ?? order.billingAddress;
       const traditionalOrder: InvoiceOrder = {
@@ -999,7 +999,6 @@ export async function generateInvoicePdf(order: InvoiceOrder): Promise<Buffer | 
       });
       doc.y = PDF_MARGIN + 42;
       drawNotice("This is a test proforma invoice, not a tax invoice.", "EnglishBold");
-      drawSectionHeading("English Version", "EnglishBold");
       drawKeyValueGridKit(
         "Customer",
         "Order Details",
